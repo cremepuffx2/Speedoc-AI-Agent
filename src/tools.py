@@ -22,7 +22,6 @@ def get_data() -> Dataset:
 
 
 def get_as_of() -> pd.Timestamp:
-    """Reference date for 'overdue' and relative periods. Override with AS_OF_DATE=YYYY-MM-DD."""
     return pd.Timestamp(os.getenv("AS_OF_DATE") or date.today())
 
 ######################## Helper Functions ####################
@@ -130,7 +129,7 @@ def _with_data_caveats(df: pd.DataFrame, response: dict) -> dict:
 
 
 def _safe(fn):
-    @wraps(fn)  # keeps the tool's name, docstring and signature visible
+    @wraps(fn)
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
@@ -143,8 +142,6 @@ def _safe(fn):
 
 @_safe
 def get_dataset_info() -> dict:
-    """Describe the available data: columns, valid values, date coverage, as-of date and
-    known data-quality issues. Use this to check whether a question can be answered at all."""
     ds = get_data()
     inv, pay = ds.invoices, ds.payments
     return {
@@ -367,6 +364,28 @@ def summarize_payments(
     return response
 
 
+@_safe
+def get_payment_details(payment_id: str) -> dict:
+    pay = get_data().payments
+    match = pay[pay["payment_id"].str.upper() == payment_id.strip().upper()]
+    if match.empty:
+        return {"error": f"Payment '{payment_id}' does not exist in payments.csv "
+                         f"({len(pay)} payments checked)."}
+    row = match.iloc[0]
+    record = {"payment_id": row["payment_id"], "invoice_id": row["invoice_id"],
+              "paid_at": _fmt_date(row["paid_at"]), "amount": float(row["amount"]), "method": row["method"]}
+    response = {
+        "result": {"payment": record},
+        "rows_cited": [row["payment_id"]],
+        "query": f"payments WHERE payment_id = '{row['payment_id']}'",
+    }
+    if row["is_orphan"]:
+        response["data_caveats"] = [f"Invoice {row['invoice_id']} does not exist in invoices.csv; "
+                                    "this payment is excluded from invoice balances."]
+    return response
+
+
 # List of final tools for agent calling
 TOOLS = {fn.__name__: fn for fn in (get_dataset_info, list_invoices, aggregate_invoices,
-                                    get_overdue_invoices, get_invoice_details, summarize_payments)}
+                                    get_overdue_invoices, get_invoice_details, get_payment_details,
+                                    summarize_payments)}

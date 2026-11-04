@@ -129,6 +129,9 @@ def load_payments(path: Path, invoice_ids: set[str], issues: list[DataIssue]) ->
     if was_dmy.any():
         issues.append(DataIssue("payments", "paid_at in DD/MM/YYYY format",
                                 df.loc[was_dmy, "payment_id"].tolist(), "Parsed explicitly as day/month/year."))
+    if parsed.isna().any():
+        issues.append(DataIssue("payments", "Unparseable paid_at",
+                                df.loc[parsed.isna(), "payment_id"].tolist(), "Left as missing (NaT)."))
     df["paid_at"] = parsed
 
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
@@ -158,6 +161,14 @@ def _add_payment_totals(inv: pd.DataFrame, pay: pd.DataFrame, issues: list[DataI
     paid = valid.groupby("invoice_id")["amount"].sum()
     inv["amount_paid"] = inv["invoice_id"].map(paid).fillna(0.0).round(2)
     inv["balance"] = (inv["amount"] - inv["amount_paid"]).round(2)
+
+    # A payment cannot precede its invoice; many such rows suggest a mis-sorted or mis-joined file.
+    issued = valid["invoice_id"].map(inv.set_index("invoice_id")["issue_date"])
+    early = valid["paid_at"] < issued
+    if early.any():
+        issues.append(DataIssue("payments", "Payment dated before its invoice was issued",
+                                valid.loc[early, "payment_id"].tolist(),
+                                "Flagged; if many rows are affected, check the file was not re-sorted or edited."))
 
     over = inv["balance"] < -0.01
     if over.any():

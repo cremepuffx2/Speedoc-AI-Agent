@@ -1,5 +1,5 @@
-"""Deterministic query tools the agent calls to answer questions.
-
+"""
+Deterministic query tools the agent calls to answer questions.
 Every answer comes from one of these functions, and every function returns a dict with:
     result       - the computed answer (rows or aggregates)
     rows_cited   - IDs of the invoices/payments the answer is based on
@@ -117,10 +117,10 @@ def _with_data_caveats(df: pd.DataFrame, response: dict) -> dict:
     caveats = []
     missing = df.loc[df["amount"].isna(), "invoice_id"].tolist()
     if missing:
-        caveats.append(f"Invoices {missing} have no amount recorded and are excluded from money totals.")
+        caveats.append(f"Invoice(s) {', '.join(missing)} have no amount recorded and are excluded from money totals.")
     over = df.loc[df["balance"] < -0.01, "invoice_id"].tolist()
     if over:
-        caveats.append(f"Invoices {over} are overpaid (negative balance) and excluded from outstanding totals.")
+        caveats.append(f"Invoice(s) {', '.join(over)} are overpaid (negative balance) and excluded from outstanding totals.")
     if df.empty:
         caveats.append("No invoices matched. " + _coverage_note())
     if caveats:
@@ -139,7 +139,6 @@ def _safe(fn):
 
 
 ######################## Tools ########################
-
 @_safe
 def get_dataset_info() -> dict:
     ds = get_data()

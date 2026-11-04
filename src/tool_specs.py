@@ -1,5 +1,5 @@
-"""JSON-schema descriptions of each tool, sent to the LLM so it knows what it can call.
-
+"""
+JSON-schema descriptions of each tool, sent to the LLM so it knows what it can call.
 Enums restrict the LLM to values the tools accept; descriptions tell it when to use each tool.
 """
 

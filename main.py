@@ -1,5 +1,5 @@
-"""Interactive command-line chat with the invoicing agent.
-
+"""
+Interactive command-line chat with the invoicing agent.
 Usage:
     python main.py                 # chat
     python main.py --list-models   # show Gemini models available to your API key
@@ -9,7 +9,7 @@ import sys
 
 from dotenv import load_dotenv
 
-load_dotenv()  # reads GEMINI_API_KEY (and optional GEMINI_MODEL, AS_OF_DATE) from .env
+load_dotenv()
 
 
 def list_models() -> None:
@@ -31,7 +31,7 @@ def chat() -> None:
         if question.lower() in {"exit", "quit"}:
             break
         if question.lower() == "reset":
-            agent.history.clear()
+            agent.reset()
             continue
         if not question:
             continue

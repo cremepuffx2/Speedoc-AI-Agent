@@ -1,4 +1,5 @@
-"""Load, validate and clean the invoice and payment CSVs.
+"""
+Load, validate and clean the invoice and payment CSVs.
 
 Every check appends a DataIssue to a log, so the cleaning is transparent and
 the same log can be printed, written to the README, or shown by the agent.
@@ -6,7 +7,6 @@ the same log can be printed, written to the README, or shown by the agent.
 Run directly to print the data-quality report:
     python -m src.data_loader
 """
-
 from __future__ import annotations
 
 import re
@@ -20,7 +20,6 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "Dataset"
 VALID_STATUSES = {"paid", "partial", "unpaid", "overdue"}
 VALID_METHODS = {"PayNow", "Card", "Bank Transfer", "Corporate", "Insurance"}
 
-# Phrases that look like instructions aimed at an AI rather than a finance note.
 INJECTION_PATTERN = re.compile(
     r"ignore (?:all )?previous instructions|system note|mark this invoice|"
     r"exclude customer|you are now|disregard",
@@ -32,7 +31,7 @@ INJECTION_PATTERN = re.compile(
 class DataIssue:
     table: str
     check: str
-    rows: list[str]  # IDs of the affected rows
+    rows: list[str]
     action: str
 
     def __str__(self) -> str:
@@ -48,22 +47,15 @@ class Dataset:
 
 
 def _parse_mixed_dates(series: pd.Series) -> tuple[pd.Series, pd.Series]:
-    """Parse a column holding both YYYY-MM-DD and DD/MM/YYYY strings.
-
-    Each format is parsed explicitly (never guessed), so 05/06/2026 is always
-    5 June, not 6 May. Returns the parsed dates and a mask of DD/MM/YYYY rows.
-    """
     iso = pd.to_datetime(series, format="%Y-%m-%d", errors="coerce")
     dmy = pd.to_datetime(series, format="%d/%m/%Y", errors="coerce")
     return iso.fillna(dmy), iso.isna() & dmy.notna()
 
 
 def load_invoices(path: Path, issues: list[DataIssue]) -> pd.DataFrame:
-    # Read everything as text first so nothing is silently coerced.
     df = pd.read_csv(path, dtype=str, keep_default_na=False)
     df = df.apply(lambda col: col.str.strip())
 
-    # 1. Exact duplicate rows
     dup_mask = df.duplicated(keep="first")
     if dup_mask.any():
         issues.append(DataIssue("invoices", "Exact duplicate rows",
@@ -71,14 +63,12 @@ def load_invoices(path: Path, issues: list[DataIssue]) -> pd.DataFrame:
                                 "Dropped the repeated copy; kept one row per invoice."))
         df = df[~dup_mask]
 
-    # Same ID but different contents would be a real conflict, not a copy.
     conflict = df["invoice_id"].duplicated(keep=False)
     if conflict.any():
         issues.append(DataIssue("invoices", "Conflicting rows sharing an invoice_id",
                                 sorted(set(df.loc[conflict, "invoice_id"])),
                                 "Kept all rows; flagged for manual review."))
-
-    # 2. Mixed date formats
+        
     for col in ("issue_date", "due_date"):
         parsed, was_dmy = _parse_mixed_dates(df[col])
         if was_dmy.any():
@@ -96,7 +86,6 @@ def load_invoices(path: Path, issues: list[DataIssue]) -> pd.DataFrame:
         issues.append(DataIssue("invoices", "due_date earlier than issue_date",
                                 df.loc[bad_order, "invoice_id"].tolist(), "Flagged; left unchanged."))
 
-    # 3. Amounts
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
     missing_amt = df["amount"].isna()
     if missing_amt.any():
@@ -108,7 +97,6 @@ def load_invoices(path: Path, issues: list[DataIssue]) -> pd.DataFrame:
         issues.append(DataIssue("invoices", "Zero or negative amount",
                                 df.loc[non_positive, "invoice_id"].tolist(), "Flagged; left unchanged."))
 
-    # 4. Categorical values
     df["status"] = df["status"].str.lower()
     bad_status = ~df["status"].isin(VALID_STATUSES)
     if bad_status.any():
@@ -117,7 +105,6 @@ def load_invoices(path: Path, issues: list[DataIssue]) -> pd.DataFrame:
 
     df["payment_attempts"] = pd.to_numeric(df["payment_attempts"], errors="coerce").astype("Int64")
 
-    # 5. Notes that try to instruct an AI (prompt injection)
     suspicious = df["notes"].str.contains(INJECTION_PATTERN)
     df["notes_suspicious"] = suspicious
     if suspicious.any():
@@ -178,7 +165,6 @@ def _add_payment_totals(inv: pd.DataFrame, pay: pd.DataFrame, issues: list[DataI
                                 inv.loc[over, "invoice_id"].tolist(),
                                 "Flagged; balance shown as negative (credit owed to customer)."))
 
-    # Status should agree with the payment records.
     tol = 0.01
     expected = pd.Series("partial", index=inv.index)
     expected[inv["amount_paid"] <= tol] = "unpaid_or_overdue"

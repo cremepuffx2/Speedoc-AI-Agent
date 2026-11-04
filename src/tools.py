@@ -8,13 +8,10 @@ Every answer comes from one of these functions, and every function returns a dic
 or, if the request is invalid, an "error" key explaining why.
 """
 from __future__ import annotations
-
 import os
 from datetime import date
-from functools import lru_cache
-
+from functools import lru_cache, wraps
 import pandas as pd
-
 from src.data_loader import Dataset, load_dataset
 
 MAX_ROWS = 50
@@ -133,12 +130,12 @@ def _with_data_caveats(df: pd.DataFrame, response: dict) -> dict:
 
 
 def _safe(fn):
+    @wraps(fn)  # keeps the tool's name, docstring and signature visible
     def wrapper(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
         except ValueError as exc:
             return {"error": str(exc)}
-    wrapper.__name__, wrapper.__doc__ = fn.__name__, fn.__doc__
     return wrapper
 
 

@@ -259,7 +259,10 @@ def get_overdue_invoices(
     min_days_overdue: int = 1,
     service_type: str | None = None,
     customer_id: str | None = None,
+    group_by: str | None = None,
 ) -> dict:
+    if group_by not in (None, "customer_id", "service_type"):
+        raise ValueError("group_by must be 'customer_id', 'service_type' or omitted.")
     as_of = get_as_of()
     inv, conds, assumptions = _filter_invoices(service_type, customer_id)
     inv = inv.assign(days_overdue=(as_of - inv["due_date"]).dt.days)
@@ -270,12 +273,23 @@ def get_overdue_invoices(
                        "Partially paid invoices count; their remaining balance is what is overdue.")
 
     stale = inv.loc[inv["status"] != "overdue", "invoice_id"].tolist()
+    result = {"total_matches": len(inv), "total_overdue_balance": round(float(inv["balance"].sum()), 2)}
+    if group_by:
+        # Per-group totals computed here so the LLM never has to add up rows itself.
+        grouped = (inv.groupby(group_by)
+                   .agg(overdue_balance=("balance", "sum"), invoice_count=("invoice_id", "count"),
+                        max_days_overdue=("days_overdue", "max"), invoice_ids=("invoice_id", list))
+                   .sort_values("overdue_balance", ascending=False).round(2).reset_index())
+        result["group_count"] = len(grouped)
+        result["groups"] = grouped.head(MAX_ROWS).to_dict(orient="records")
+        query_tail = f" GROUP BY {group_by} ORDER BY overdue_balance DESC"
+    else:
+        result["invoices"] = _invoice_rows(inv, ("days_overdue", "payment_attempts"))
+        query_tail = " ORDER BY days_overdue DESC"
     response = {
-        "result": {"total_matches": len(inv),
-                   "total_overdue_balance": round(float(inv["balance"].sum()), 2),
-                   "invoices": _invoice_rows(inv, ("days_overdue", "payment_attempts"))},
+        "result": result,
         "rows_cited": inv["invoice_id"].tolist(),
-        "query": "invoices WHERE " + " AND ".join(conds) + " ORDER BY days_overdue DESC",
+        "query": "invoices WHERE " + " AND ".join(conds) + query_tail,
         "assumptions": assumptions,
     }
     if stale:

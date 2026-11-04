@@ -14,7 +14,7 @@ load_dotenv()
 
 def list_models() -> None:
     from google import genai
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"]) 
     for m in client.models.list():
         if "generateContent" in (m.supported_actions or []):
             print(m.name)
@@ -41,7 +41,7 @@ def chat() -> None:
             print(f"\n[Gemini API error {exc.code}: {exc.message}]\n"
                   "Your question was not answered. Try again shortly, or set a different GEMINI_MODEL in .env.\n")
             continue
-        print(f"\nAgent: {reply.text}\n\n{reply.evidence()}\n")
+        print(f"\nAgent: {reply.render()}\n")
 
 
 if __name__ == "__main__":

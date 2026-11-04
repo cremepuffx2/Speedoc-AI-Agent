@@ -50,11 +50,14 @@ TOOL_SPECS = [
     {
         "name": "get_overdue_invoices",
         "description": "Invoices past their due date that still have a balance, with days overdue. "
-                       "Always use this for overdue questions instead of filtering on status.",
+                       "Always use this for overdue questions instead of filtering on status. "
+                       "Use group_by for per-customer or per-service overdue totals.",
         "parameters": {"type": "object", "properties": {
             "min_days_overdue": {"type": "integer", "description": "Minimum days past due date. Default 1."},
             "service_type": _FILTERS["service_type"],
             "customer_id": _FILTERS["customer_id"],
+            "group_by": {"type": "string", "enum": ["customer_id", "service_type"],
+                         "description": "Return overdue totals per group instead of individual invoices."},
         }},
     },
     {

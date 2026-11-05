@@ -21,6 +21,7 @@ def list_models() -> None:
 
 
 def chat() -> None:
+    import httpx
     from google.genai.errors import APIError
 
     from src.agent import InvoiceAgent
@@ -40,6 +41,10 @@ def chat() -> None:
         except APIError as exc:
             print(f"\n[Gemini API error {exc.code}: {exc.message}]\n"
                   "Your question was not answered. Try again shortly, or set a different GEMINI_MODEL in .env.\n")
+            continue
+        except httpx.TransportError as exc:
+            print(f"\n[Network error reaching Gemini: {type(exc).__name__}]\n"
+                  "Your question was not answered. Check your connection and try again.\n")
             continue
         print(f"\nAgent: {reply.render()}\n")
 

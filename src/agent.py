@@ -13,6 +13,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
+import httpx
 from google import genai
 from google.genai import errors, types
 
@@ -184,9 +185,14 @@ class InvoiceAgent:
             try:
                 return self.client.models.generate_content(
                     model=self.model, contents=self.history, config=self.config)
-            except errors.APIError as exc:
-                if exc.code not in RETRYABLE_CODES or attempt == retries - 1:
+            except (errors.APIError, httpx.TransportError) as exc:
+                # APIError = Google answered with an error code; TransportError = the network
+                # connection dropped or timed out before any answer arrived.
+                code = getattr(exc, "code", None)
+                is_network = isinstance(exc, httpx.TransportError)
+                if not (is_network or code in RETRYABLE_CODES) or attempt == retries - 1:
                     raise
                 wait = 10 * (attempt + 1)
-                print(f"  (Gemini returned {exc.code}; retrying in {wait}s...)")
+                reason = f"network error ({type(exc).__name__})" if is_network else f"error {code}"
+                print(f"  (Gemini {reason}; retrying in {wait}s...)")
                 time.sleep(wait)

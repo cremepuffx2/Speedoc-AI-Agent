@@ -218,10 +218,14 @@ def main() -> None:
             print("   ", "PASS" if all(ok for _, ok in results) else
                   "CHECK: " + "; ".join(n for n, ok in results if not ok))
         except APIError as exc:
-            outcomes.append((i, case, [], [], f"{exc.code} {exc.message}"))
+            outcomes.append((i, case, [], [], f"API error {exc.code}: {exc.message}"))
             print(f"    API error {exc.code}")
+        except Exception as exc:  # e.g. network failure after retries: record it and keep going
+            outcomes.append((i, case, [], [], f"{type(exc).__name__}: {exc}"))
+            print(f"    ERROR {type(exc).__name__}")
+        # Save after every case so a crash never loses completed results.
+        REPORT.write_text(to_markdown(agent.model, outcomes), encoding="utf-8")
 
-    REPORT.write_text(to_markdown(agent.model, outcomes), encoding="utf-8")
     print(f"\nReport written to {REPORT}")
 
 

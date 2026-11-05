@@ -186,8 +186,6 @@ class InvoiceAgent:
                 return self.client.models.generate_content(
                     model=self.model, contents=self.history, config=self.config)
             except (errors.APIError, httpx.TransportError) as exc:
-                # APIError = Google answered with an error code; TransportError = the network
-                # connection dropped or timed out before any answer arrived.
                 code = getattr(exc, "code", None)
                 is_network = isinstance(exc, httpx.TransportError)
                 if not (is_network or code in RETRYABLE_CODES) or attempt == retries - 1:

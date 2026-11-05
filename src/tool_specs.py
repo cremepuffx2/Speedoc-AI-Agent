@@ -76,6 +76,17 @@ TOOL_SPECS = [
         }},
     },
     {
+        "name": "draft_payment_reminder",
+        "description": "Draft (NOT send) a polite payment-reminder email for one overdue invoice. All facts are "
+                       "filled from the data. Refuses if the invoice is not overdue. To pick an invoice "
+                       "(e.g. 'the most overdue'), call get_overdue_invoices first.",
+        "parameters": {"type": "object", "required": ["invoice_id"], "properties": {
+            "invoice_id": {"type": "string", "description": "e.g. 'INV-3169'"},
+            "tone": {"type": "string", "enum": ["auto", "gentle", "firm"],
+                     "description": "auto = gentle up to 60 days overdue, firm (still polite) after."},
+        }},
+    },
+    {
         "name": "summarize_payments",
         "description": "Totals and counts of payments received, filtered on payment date (paid_at), "
                        "optionally grouped by method or month.",

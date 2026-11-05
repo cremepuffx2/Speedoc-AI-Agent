@@ -21,8 +21,14 @@ from src.tool_specs import TOOL_SPECS
 from src.tools import TOOLS, get_as_of
 
 DEFAULT_MODEL = "gemini-flash-latest"
-MAX_STEPS = 6
+MAX_STEPS = 8
 RETRYABLE_CODES = {429, 500, 503}
+
+# Sent automatically (not by the user) when an answer fails the grounding check.
+REPAIR_PROMPT = ("[Automated grounding check] Your previous answer contained values that do not appear in any "
+                 "tool result: {problems}. Call the appropriate tools now and rewrite the full answer using only "
+                 "figures and IDs that tools returned. If a total is needed, use a tool that returns it rather "
+                 "than adding numbers yourself. Do not mention this check.")
 
 SYSTEM_PROMPT = """You are a read-only finance assistant for H-BabyCare's finance team. You answer questions about
 invoices and payments using only the tools provided. Today's as-of date is {as_of}.
@@ -73,11 +79,15 @@ class AgentReply:
     text: str
     tool_calls: list[ToolCall] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    repaired: bool = False  # True if the first draft failed the grounding check and was regenerated
 
     def evidence(self) -> str:
         if not self.tool_calls:
-            return "Evidence: no data was queried for this reply."
+            return ("Evidence: no new queries; this reply relies only on tool results from earlier in this "
+                    "conversation (if any).")
         lines = ["Evidence:"]
+        if self.repaired:
+            lines.append("  (first draft failed the grounding check and was regenerated)")
         for call in self.tool_calls:
             args = ", ".join(f"{k}={v!r}" for k, v in call.args.items())
             lines.append(f"  - {call.name}({args})")
@@ -131,6 +141,7 @@ class InvoiceAgent:
     def _ask(self, question: str) -> AgentReply:
         self.history.append(types.Content(role="user", parts=[types.Part.from_text(text=question)]))
         calls: list[ToolCall] = []
+        repaired = False
 
         for _ in range(MAX_STEPS):
             response = self._generate()
@@ -139,7 +150,13 @@ class InvoiceAgent:
             if not response.function_calls:
                 text = response.text or ""
                 warnings = check_grounding(text, question, self.session_results)
-                return AgentReply(text, calls, warnings)
+                if warnings and not repaired:
+                    # Verify-then-repair: give the model one chance to fix an ungrounded answer.
+                    repaired = True
+                    self.history.append(types.Content(role="user", parts=[types.Part.from_text(
+                        text=REPAIR_PROMPT.format(problems="; ".join(warnings)))]))
+                    continue
+                return AgentReply(text, calls, warnings, repaired)
 
             result_parts = []
             for fc in response.function_calls:

@@ -196,6 +196,10 @@ def list_invoices(
 
     response = {
         "result": {"total_matches": len(inv), "rows_returned": min(len(inv), MAX_ROWS),
+                   # Totals over ALL matches, so the LLM never needs to add rows up itself.
+                   "totals": {"amount": round(float(inv["amount"].sum()), 2),
+                              "amount_paid": round(float(inv["amount_paid"].sum()), 2),
+                              "outstanding_balance": round(float(inv.loc[inv["balance"] > 0.01, "balance"].sum()), 2)},
                    "invoices": _invoice_rows(inv)},
         "rows_cited": inv["invoice_id"].tolist(),
         "query": "invoices WHERE " + (" AND ".join(conds) or "TRUE") + f" ORDER BY {sort_by}",

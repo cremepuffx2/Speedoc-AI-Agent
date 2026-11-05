@@ -402,7 +402,98 @@ def get_payment_details(payment_id: str) -> dict:
     return response
 
 
+def _long_date(ts) -> str:
+    return f"{ts.day} {ts:%B %Y}"  # e.g. 17 April 2026
+
+
+@_safe
+def draft_payment_reminder(invoice_id: str, tone: str = "auto") -> dict:
+    """Draft (never send) a payment-reminder email for one overdue invoice.
+
+    Every fact in the email is filled from the data by this function, not by the LLM.
+    Notes are never copied into the email: they are internal and may contain injected text.
+    """
+    if tone not in ("auto", "gentle", "firm"):
+        raise ValueError("tone must be 'auto', 'gentle' or 'firm'.")
+    inv = get_data().invoices
+    match = inv[inv["invoice_id"].str.upper() == invoice_id.strip().upper()]
+    if match.empty:
+        return {"error": f"Invoice '{invoice_id}' does not exist in the data."}
+    row = match.iloc[0]
+    as_of = get_as_of()
+
+    # Guardrails: only draft for invoices that genuinely have an overdue balance.
+    if pd.isna(row["amount"]):
+        return {"error": f"{row['invoice_id']} has no amount recorded; a reminder cannot be drafted safely."}
+    days_overdue = (as_of - row["due_date"]).days
+    if row["balance"] <= 0.01:
+        return {"error": f"{row['invoice_id']} has no outstanding balance (status '{row['status']}', "
+                         f"paid {row['amount_paid']:.2f} of {row['amount']:.2f}). No reminder is needed."}
+    if days_overdue < 1:
+        return {"error": f"{row['invoice_id']} is not overdue yet (due {_fmt_date(row['due_date'])}, "
+                         f"as of {_fmt_date(as_of)}). No reminder is needed."}
+
+    if tone == "auto":
+        tone = "firm" if days_overdue > 60 else "gentle"
+
+    paid_line = (f"Thank you for the payment of ${row['amount_paid']:.2f} received so far. "
+                 if row["amount_paid"] > 0 else "")
+    if tone == "gentle":
+        subject = f"Friendly reminder: invoice {row['invoice_id']} is past due"
+        ask = ("If you have already arranged payment, please disregard this message and accept our thanks. "
+               "Otherwise, we would be grateful if you could settle the balance at your earliest convenience.")
+    else:
+        subject = f"Payment reminder: invoice {row['invoice_id']} is {days_overdue} days past due"
+        ask = ("We would be grateful if you could arrange payment within the next 7 days. If there is a reason "
+               "the invoice cannot be paid, or you would like to discuss a payment arrangement, please let us "
+               "know and we will be happy to help.")
+
+    body = (
+        f"Dear [Customer name],\n\n"
+        f"I hope you are well. This is a reminder that invoice {row['invoice_id']} for {row['service_type']}, "
+        f"issued on {_long_date(row['issue_date'])}, was due on {_long_date(row['due_date'])}. "
+        f"{paid_line}As of {_long_date(as_of)}, the outstanding balance is ${row['balance']:.2f}.\n\n"
+        f"{ask}\n\n"
+        f"[Payment instructions]\n\n"
+        f"If you have any questions about this invoice, please reply to this email or contact us at "
+        f"[Contact details].\n\n"
+        f"Kind regards,\n[Your name]\nH-BabyCare Finance Team"
+    )
+
+    review_notes = ["DRAFT ONLY - nothing has been sent. Fill in the [placeholders]: customer names and "
+                    "contact details are not in the dataset."]
+    if row["notes_suspicious"]:
+        review_notes.append("This invoice's note contains instruction-like text (possible prompt injection). "
+                            "It was withheld and is not in the email.")
+    elif row["notes"]:
+        review_notes.append(f"Internal note on this invoice (not included in the email): '{row['notes']}'. "
+                            "Check it before sending.")
+    if pd.notna(row["payment_attempts"]) and row["payment_attempts"] >= 2:
+        review_notes.append(f"{row['payment_attempts']} payment attempts are recorded; consider checking for "
+                            "failed payments before sending.")
+    if row["status"] != "overdue":
+        review_notes.append(f"The status column says '{row['status']}'; the invoice is overdue based on its "
+                            "due date and payments.")
+
+    return {
+        "result": {
+            "status": "DRAFT - NOT SENT",
+            "to": f"[Email for customer {row['customer_id']}]",
+            "subject": subject,
+            "body": body,
+            "tone": tone,
+            "facts_used": {"invoice_id": row["invoice_id"], "customer_id": row["customer_id"],
+                           "amount": float(row["amount"]), "amount_paid": float(row["amount_paid"]),
+                           "balance": float(row["balance"]), "due_date": _fmt_date(row["due_date"]),
+                           "days_overdue": int(days_overdue)},
+            "review_notes": review_notes,
+        },
+        "rows_cited": [row["invoice_id"]],
+        "query": f"invoices WHERE invoice_id = '{row['invoice_id']}' (balance > 0 AND due_date < {_fmt_date(as_of)})",
+    }
+
+
 # List of final tools for agent calling
 TOOLS = {fn.__name__: fn for fn in (get_dataset_info, list_invoices, aggregate_invoices,
                                     get_overdue_invoices, get_invoice_details, get_payment_details,
-                                    summarize_payments)}
+                                    summarize_payments, draft_payment_reminder)}

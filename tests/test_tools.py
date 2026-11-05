@@ -1,11 +1,12 @@
-"""Deterministic tests for data cleaning, tools and the grounding check. No API key needed.
+"""
+Deterministic tests for data cleaning, tools and the grounding check. No API key needed.
 
 Run: python -m pytest -v
 Expected values were cross-checked against independent pandas calculations on the raw CSVs.
 """
 import os
 
-os.environ["AS_OF_DATE"] = "2026-11-04"  # fixed reference date so results never drift
+os.environ["AS_OF_DATE"] = "2026-11-04"
 
 import pytest
 
@@ -13,7 +14,7 @@ from src.guardrails import check_grounding
 from src.tools import TOOLS, get_data
 
 
-# ---------------------------------------------------------------- data cleaning
+######################## Data Cleaning ########################
 
 def test_duplicates_removed():
     inv = get_data().invoices
@@ -24,14 +25,13 @@ def test_duplicates_removed():
 def test_mixed_date_formats_parsed():
     inv = get_data().invoices
     assert inv["issue_date"].notna().all() and inv["due_date"].notna().all()
-    # 24/07/2026 (DD/MM/YYYY in the raw file) must become 24 July, not fail or swap.
     row = inv.set_index("invoice_id").loc["INV-3018"]
     assert row["due_date"].strftime("%Y-%m-%d") == "2026-07-24"
 
 
 def test_missing_amount_not_imputed():
     row = get_data().invoices.set_index("invoice_id").loc["INV-3018"]
-    assert row["amount"] != row["amount"]  # NaN stays NaN
+    assert row["amount"] != row["amount"]
 
 
 def test_known_issues_logged():
@@ -45,7 +45,7 @@ def test_injection_notes_flagged():
     assert flagged == {"INV-3017", "INV-3028"}
 
 
-# ---------------------------------------------------------------- tools
+######################## Tools ############################
 
 def test_total_outstanding():
     r = TOOLS["aggregate_invoices"](metric="total_outstanding")
@@ -57,7 +57,7 @@ def test_overdue_more_than_30_days():
     r = TOOLS["get_overdue_invoices"](min_days_overdue=31)
     assert r["result"]["total_matches"] == 66
     assert r["result"]["total_overdue_balance"] == 7991.92
-    assert "status_column_note" in r  # stale status values are surfaced
+    assert "status_column_note" in r
 
 
 def test_overdue_by_customer_includes_c1010():
@@ -90,8 +90,7 @@ def test_payment_lookup_and_orphan():
 def test_invoice_lookup_marks_suspicious_note():
     r = TOOLS["get_invoice_details"]("INV-3017")
     assert "notes_warning" in r["result"]["invoice"]
-    assert r["result"]["invoice"]["balance"] == 131.12  # still unpaid, despite the note
-
+    assert r["result"]["invoice"]["balance"] == 131.12
 
 def test_payments_by_method_exclude_orphans():
     r = TOOLS["summarize_payments"](group_by="method")
@@ -103,12 +102,13 @@ def test_payments_by_method_exclude_orphans():
 def test_every_tool_returns_citation_fields(name):
     args = {"get_invoice_details": {"invoice_id": "INV-3001"},
             "get_payment_details": {"payment_id": "PAY-5001"},
-            "aggregate_invoices": {"metric": "count"}}.get(name, {})
+            "aggregate_invoices": {"metric": "count"},
+            "draft_payment_reminder": {"invoice_id": "INV-3169"}}.get(name, {})
     r = TOOLS[name](**args)
     assert "query" in r and "rows_cited" in r
 
 
-# ---------------------------------------------------------------- grounding check
+######################## Grounding Check ########################
 
 def test_grounding_passes_tool_figures():
     r = TOOLS["get_overdue_invoices"](min_days_overdue=31)
@@ -120,3 +120,23 @@ def test_grounding_flags_invented_id_and_figure():
     warnings = check_grounding("INV-3999 owes $765.80.", "q", [r])
     assert any("INV-3999" in w for w in warnings)
     assert any("765.80" in w for w in warnings)
+
+
+######################## Reminder Drafts ########################
+
+def test_reminder_uses_data_facts():
+    r = TOOLS["draft_payment_reminder"]("INV-3008")["result"]
+    assert r["status"] == "DRAFT - NOT SENT"
+    assert "$161.10" in r["body"] and "$137.24" in r["body"]
+
+
+def test_reminder_refused_when_not_overdue():
+    assert "error" in TOOLS["draft_payment_reminder"]("INV-3183")
+    assert "error" in TOOLS["draft_payment_reminder"]("INV-3018")
+
+
+def test_reminder_never_includes_notes():
+    r = TOOLS["draft_payment_reminder"]("INV-3017")["result"]
+    email = (r["subject"] + r["body"]).lower()
+    assert "ignore" not in email and "mark this invoice" not in email
+    assert any("prompt injection" in n for n in r["review_notes"])
